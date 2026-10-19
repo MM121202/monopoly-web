@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1117">
+<title>大富翁 · Monopoly Web</title>
+<meta name="description" content="纯前端、零依赖、可离线运行的大富翁游戏。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230e1117'/%3E%3Crect x='18' y='18' width='30' height='30' rx='7' fill='%23d8b45c'/%3E%3Crect x='52' y='52' width='30' height='30' rx='7' fill='%23d8b45c'/%3E%3Ccircle cx='67' cy='33' r='9' fill='%23e4584c'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true"></span>
+      <div class="brand__text">
+        <h1>大富翁</h1>
+        <p>纯前端 · 零依赖 · 可离线</p>
+      </div>
+    </div>
+    <div class="topbar__actions">
+      <button id="btn-new" class="btn btn--ghost" type="button">重新开始</button>
+      <a class="btn btn--ghost" href="https://github.com/MM121202/monopoly-web" target="_blank" rel="noreferrer">GitHub</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="board-area">
+      <div id="board" class="board" role="grid" aria-label="棋盘"></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel panel--players">
+        <h2 class="panel__title">玩家</h2>
+        <div id="players" class="players"></div>
+      </section>
+
+      <section class="panel panel--turn">
+        <div class="turnbar">
+          <div class="turnbar__who">
+            <span id="turn-player" class="turnbar__name">—</span>
+            <span id="turn-phase" class="turnbar__phase">等待开始</span>
+          </div>
+          <div id="dice" class="dice" aria-live="polite">
+            <div class="die" data-face="0"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="die" data-face="0"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+        </div>
+        <div id="controls" class="controls"></div>
+      </section>
+
+      <section class="panel panel--assets">
+        <h2 class="panel__title">我的资产</h2>
+        <div id="assets" class="assets"><p class="empty">还没有地产</p></div>
+      </section>
+
+      <section class="panel panel--log">
+        <h2 class="panel__title">对局记录</h2>
+        <ol id="log" class="log"></ol>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<div id="tooltip" class="tooltip" hidden></div>
+
+<div id="setup" class="modal" aria-hidden="false">
+  <div class="modal__card">
+    <h2 class="modal__title">新对局</h2>
+    <p class="modal__hint">标准 40 格规则，支持 2–4 人，可人机对战。</p>
+    <label class="field">
+      <span>你的名字</span>
+      <input id="in-name" type="text" value="玩家" maxlength="12" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>玩家人数</span>
+      <select id="in-count">
+        <option value="2" selected>2 人（你 + 1 电脑）</option>
+        <option value="3">3 人（你 + 2 电脑）</option>
+        <option value="4">4 人（你 + 3 电脑）</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>回合上限</span>
+      <select id="in-turns">
+        <option value="100">100 回合（快局）</option>
+        <option value="150" selected>150 回合（标准）</option>
+        <option value="250">250 回合（长局）</option>
+        <option value="0">不限（可能很长）</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>随机种子（可留空）</span>
+      <input id="in-seed" type="text" placeholder="用于复现对局" autocomplete="off">
+    </label>
+    <button id="btn-start" class="btn btn--primary btn--block" type="button">开始游戏</button>
+    <p class="modal__foot">规则说明见 README · MIT License</p>
+  </div>
+</div>
+
+<div id="result" class="modal" hidden>
+  <div class="modal__card">
+    <h2 class="modal__title" id="result-title">对局结束</h2>
+    <p class="modal__hint" id="result-text"></p>
+    <button id="btn-again" class="btn btn--primary btn--block" type="button">再来一局</button>
+  </div>
+</div>
+
+<script type="module" src="src/ui/main.js"></script>
+</body>
+</html>

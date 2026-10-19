@@ -1,0 +1,16 @@
+{
+  "name": "monopoly-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "大富翁 · 纯前端、零依赖、可离线运行的开源实现",
+  "scripts": {
+    "test": "node --test tests/game.test.js",
+    "start": "node scripts/serve.mjs"
+  },
+  "keywords": ["monopoly", "game", "vanilla-js", "zero-dependency", "canvasless"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
