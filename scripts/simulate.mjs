@@ -6,6 +6,9 @@
  *   1. 对局能不能结束（不会出现所有人互相 pass 的死循环）
  *   2. AI 会不会真的建房、抵押、破产
  *   3. 平均回合数是否在合理区间
+ *
+ * 另外会报告「撞上限判胜占比」——这一项才反映对局是否**自然收束**。
+ * 「未结束 = 0」只说明回合上限在工作，不代表对局质量好。
  */
 import { Game } from '../src/engine/game.js';
 import { decide } from '../src/ai/bot.js';
@@ -38,7 +41,7 @@ const summary = {
   mortgaged: [],
   bankrupt: [],
   unfinished: 0,
-  errors: [],
+  capWins: 0, // 撞回合上限判胜的局数（越少说明对局越能自然收束）
 };
 
 for (let g = 0; g < GAMES; g++) {
@@ -50,13 +53,15 @@ for (let g = 0; g < GAMES; g++) {
     steps += 1;
     const action = decide(game);
     if (!action) break;
+    // fail-fast：引擎/决策异常直接抛出并带上上下文。
+    // 旧实现用 try/catch 把异常吞掉再强行续局，会让「异常次数」这个指标失真、
+    // 并掩盖真实 bug —— 这里改成让它显式炸出来。
     try {
       apply(game, action);
     } catch (err) {
-      summary.errors.push(`${g}:${action.action}: ${err.message}`);
-      game.state.phase = 'await-action';
-      if (game.cur().cash < 0) game.declareBankrupt(game.cur().id, null);
-      else game.endTurn();
+      throw new Error(
+        `模拟异常（第 ${g} 局 · 第 ${steps} 步 · 动作 ${action.action} · 相位 ${game.state.phase}）：${err.message}`,
+      );
     }
   }
 
@@ -64,6 +69,8 @@ for (let g = 0; g < GAMES; g++) {
     summary.unfinished += 1;
   } else {
     summary.rounds.push(game.state.turn);
+    // endTurn 会先把 turn +1 再判上限，因此 turn > maxTurns 即撞上限判胜
+    if (game.state.turn > game.state.maxTurns) summary.capWins += 1;
   }
 
   const houses = Object.entries(game.state.houses).reduce((n, [idx, h]) => {
@@ -76,14 +83,12 @@ for (let g = 0; g < GAMES; g++) {
 
 const avg = (a) => (a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : '—');
 const max = (a) => (a.length ? Math.max(...a) : '—');
+const pct = (a, total) => (total ? ((a / total) * 100).toFixed(1) + '%' : '—');
 
 console.log(`局数 ${GAMES} · 人数 ${PLAYERS}`);
 console.log(`已分出胜负: ${summary.rounds.length} / ${GAMES}   未结束: ${summary.unfinished}`);
+console.log(`撞上限判胜: ${summary.capWins} / ${GAMES}（${pct(summary.capWins, GAMES)}）`);
 console.log(`平均回合: ${avg(summary.rounds)}   最长: ${max(summary.rounds)}`);
 console.log(`平均建房数: ${avg(summary.houses)}   最多: ${max(summary.houses)}`);
 console.log(`平均抵押数: ${avg(summary.mortgaged)}`);
 console.log(`平均破产人数: ${avg(summary.bankrupt)}`);
-if (summary.errors.length) {
-  console.log(`异常 ${summary.errors.length} 次:`);
-  for (const e of summary.errors.slice(0, 8)) console.log('  ' + e);
-}

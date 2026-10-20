@@ -1,6 +1,6 @@
 {
   "name": "monopoly-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "大富翁 · 纯前端、零依赖、可离线运行的开源实现",

@@ -18,17 +18,15 @@ export class Game {
     if (!players || players.length < 2) throw new Error('至少需要 2 名玩家');
     if (players.length > 4) throw new Error('最多支持 4 名玩家');
 
-    this.maxTurns = maxTurns;
-    this.rng = new Rng(seed);
-    this.decks = {
-      chance: this.rng.shuffle(CHANCE),
-      chest: this.rng.shuffle(CHEST),
-    };
-    this.deckIndex = { chance: 0, chest: 0 };
-    this.subs = new Set();
-
+    // 所有可变状态都集中在 this.state —— 包括 RNG 游标、洗好的牌堆、牌堆游标
+    // 和回合上限。只有这样 JSON.stringify(state) 才是完整对局，
+    // 读档后才能与中断前逐字节一致（见 snapshot/restore）。
     this.state = {
       seed,
+      maxTurns,
+      rng: { seed: seed >>> 0 },          // Rng 会就地写回 cursor.state
+      decks: { chance: [], chest: [] },   // 洗牌结果必须进状态，否则读档会重新洗牌
+      deckIndex: { chance: 0, chest: 0 }, // 牌堆游标同理
       players: players.map((p, idx) => ({
         id: idx,
         name: p.name ?? `玩家 ${idx + 1}`,
@@ -55,7 +53,24 @@ export class Game {
       log: [],
     };
 
+    // Rng 持有 state.rng 的引用：每次掷骰自动把游标写回可序列化状态
+    this.rng = new Rng(this.state.rng);
+    this.state.decks = {
+      chance: this.rng.shuffle(CHANCE),
+      chest: this.rng.shuffle(CHEST),
+    };
+    this.subs = new Set();
+
     this.log(`对局开始，共 ${players.length} 名玩家，起始资金 ${START_CASH}`);
+  }
+
+  /** 回合上限存在 state 里（读档需要），这里保留便捷访问 */
+  get maxTurns() {
+    return this.state.maxTurns;
+  }
+
+  set maxTurns(v) {
+    this.state.maxTurns = v;
   }
 
   // ---------------------------------------------------------------- 订阅
@@ -128,7 +143,9 @@ export class Game {
       if (owner !== p.id) continue;
       const i = Number(idx);
       const sq = BOARD[i];
-      if (!this.state.mortgaged[i]) total += Math.floor(sq.price / 2);
+      // 抵押地产仍有可回收价值（赎回价为面值一半的 110%），按一半计入，
+      // 否则回合上限按净资产判胜时会系统性低估抵押过资产的玩家。
+      total += Math.floor(sq.price / 2);
       if (sq.type === 'prop') total += this.housesOn(i) * Math.floor(sq.house / 2);
     }
     return total;
@@ -273,12 +290,12 @@ export class Game {
 
   moveBy(p, steps) {
     const from = p.pos;
-    const to = (from + steps) % BOARD.length;
-    if (to < from || steps < 0) {
-      // 经过起点
+    // 越过起点即发薪（含整圈）：用「起点距离」判断，比比较落点更可靠，
+    // 也覆盖 steps === BOARD.length 的整圈情况。后退（steps<0）不发。
+    if (steps > 0 && from + steps >= BOARD.length) {
       this.receive(p, GO_SALARY, '经过起点');
     }
-    p.pos = (to + BOARD.length) % BOARD.length;
+    p.pos = (((from + steps) % BOARD.length) + BOARD.length) % BOARD.length;
   }
 
   moveTo(p, idx, { salary = false } = {}) {
@@ -359,17 +376,17 @@ export class Game {
 
   // ---------------------------------------------------------------- 卡牌
   drawCard(p, deckName) {
-    const deck = this.decks[deckName];
-    const card = deck[this.deckIndex[deckName] % deck.length];
-    this.deckIndex[deckName] += 1;
+    const deck = this.state.decks[deckName];
+    const card = deck[this.state.deckIndex[deckName] % deck.length];
+    this.state.deckIndex[deckName] += 1;
     this.log(`${p.name} 抽到${deckName === DECK_CHANCE ? '机会' : '命运'}：${card.text}`, 'card');
-    this.applyCard(p, card, deckName, card);
+    this.applyCard(p, card);
 
     // 卡牌可能触发新的落地结算（例如前进到某地块）
     if (this.state.phase === 'await-buy') return;
   }
 
-  applyCard(p, card, deckName, fullCard) {
+  applyCard(p, card) {
     switch (card.kind) {
       case 'moveTo':
         this.moveTo(p, card.to, { salary: card.salary });
@@ -444,7 +461,6 @@ export class Game {
       default:
         this.log(`未实现的卡牌类型：${card.kind}`, 'warn');
     }
-    void deckName; void fullCard;
   }
 
   findNext(from, type) {
@@ -584,20 +600,30 @@ export class Game {
   }
 
   /**
-   * 规则收口：本实现不含地产交易，纯自对弈时可能长期无人破产。
+   * 规则收口：当前版本不含地产交易与拍卖，纯自对弈时可能长期无人破产，
    * 因此设回合上限，到顶后按净资产判胜 —— 与官方锦标赛的限时规则一致。
+   *
+   * 注意：这个上限会让「未结束率」恒为 0，因此它**不是**对局质量的证据。
+   * 真实的收敛性要用关闭上限后的自然结束率来衡量（见 scripts/simulate.mjs）。
    */
   turnLimitReached() {
-    if (!this.maxTurns || this.state.turn <= this.maxTurns) return false;
+    if (!this.state.maxTurns || this.state.turn <= this.state.maxTurns) return false;
     if (this.state.phase === 'over') return true;
 
     const alive = this.alive();
-    if (!alive.length) return true;
+    if (!alive.length) {
+      // 防御：无人存活也必须明确收口。否则 phase 会停留在 await-action，
+      // UI 不弹结算、模拟器的 while(phase!=='over') 也永远不退出。
+      this.state.phase = 'over';
+      this.state.winner = null;
+      this.log('所有玩家均已破产，对局结束', 'win');
+      return true;
+    }
 
     alive.sort((a, b) => this.netWorth(b) - this.netWorth(a));
     this.state.phase = 'over';
     this.state.winner = alive[0].id;
-    this.log(`达到 ${this.maxTurns} 回合上限，按净资产判定：${alive[0].name} 获胜（${this.netWorth(alive[0])}）`, 'win');
+    this.log(`达到 ${this.state.maxTurns} 回合上限，按净资产判定：${alive[0].name} 获胜（${this.netWorth(alive[0])}）`, 'win');
     return true;
   }
 
@@ -675,5 +701,25 @@ export class Game {
       break;
     }
     return p.cash >= target;
+  }
+
+  // ---------------------------------------------------------------- 存档
+  /**
+   * 完整对局快照。因为 RNG 游标、牌堆、牌序、回合上限都已在 this.state 内，
+   * 这里一次 JSON 往返即可得到可持久化的纯数据（localStorage / 文件均可）。
+   */
+  snapshot() {
+    return JSON.parse(JSON.stringify(this.state));
+  }
+
+  /**
+   * 从 snapshot() 的产物恢复对局。
+   * 恢复后与中断前**逐字节一致**：后续骰子序列、抽牌序列都不会分叉
+   * —— 这一点由 AC-S1 回归测试守着（tests/game.test.js）。
+   */
+  restore(state) {
+    this.state = state;
+    this.rng = new Rng(state.rng); // 复用存档里的 RNG 游标
+    return this;
   }
 }

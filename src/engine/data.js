@@ -26,7 +26,7 @@ export const BOARD = [
   { i: 17, type: 'chest', name: '命运',          sub: '抽一张命运卡' },
   { i: 18, type: 'prop', name: '田纳西大道',     group: 'orange',    price: 180, rent: [14, 70, 200, 550, 750, 950],     house: 100 },
   { i: 19, type: 'prop', name: '纽约大道',       group: 'orange',    price: 200, rent: [16, 80, 220, 600, 800, 1000],    house: 100 },
-  { i: 20, type: 'parking', name: '免费停车',    sub: '休息一回合' },
+  { i: 20, type: 'parking', name: '免费停车',    sub: '无效果（官方为奖金池，此处从简）' },
   { i: 21, type: 'prop', name: '肯塔基大道',     group: 'red',       price: 220, rent: [18, 90, 250, 700, 875, 1050],    house: 150 },
   { i: 22, type: 'chance', name: '机会',         sub: '抽一张机会卡' },
   { i: 23, type: 'prop', name: '印第安纳大道',   group: 'red',       price: 220, rent: [18, 90, 250, 700, 875, 1050],    house: 150 },

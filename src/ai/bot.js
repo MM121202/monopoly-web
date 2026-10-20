@@ -8,7 +8,25 @@ import { BOARD, GROUPS, JAIL_FINE, MAX_HOUSES } from '../engine/data.js';
  *  - 保留安全现金垫，避免为了买地把自己逼到破产
  *  - 优先补齐同色组（这是收租翻倍的唯一途径）
  *  - 富余现金流向房屋，尤其是已经成组的街区
+ *
+ * 策略阈值集中在下方，调参只改这里。
  */
+
+/** 开局保护期：前 N 回合更保守，先把棋盘铺开 */
+const EARLY_TURN = 12;
+/** 非补组买地的现金垫：早期 120 / 后期 200（后期租金压力更大，要多留） */
+const RESERVE_EARLY = 120;
+const RESERVE_LATE = 200;
+/** 现金低于此值不建房（保命优先） */
+const BUILD_CASH = 240;
+/** 建完房至少要剩下的现金 */
+const BUILD_KEEP = 90;
+/** 赎回抵押后至少要剩下的现金 */
+const UNMORTGAGE_KEEP = 600;
+/** 自动付保释金的现金线：await-roll 更激进一点，await-action 更保守 */
+const JAIL_FINE_CASH_ROLL = 300;
+const JAIL_FINE_CASH_ACTION = 250;
+
 export function decide(game) {
   const s = game.state;
   const me = game.cur();
@@ -17,7 +35,7 @@ export function decide(game) {
   if (s.phase === 'await-roll') {
     if (me.inJail) {
       if (me.jailCards > 0) return { action: 'useJailCard' };
-      if (me.cash > 300) return { action: 'payJailFine' };
+      if (me.cash > JAIL_FINE_CASH_ROLL) return { action: 'payJailFine' };
     }
     return { action: 'roll' };
   }
@@ -25,7 +43,7 @@ export function decide(game) {
   if (s.phase === 'await-buy') {
     const idx = s.pending.idx;
     const sq = BOARD[idx];
-    const reserve = s.turn < 12 ? 120 : 200;
+    const reserve = s.turn < EARLY_TURN ? RESERVE_EARLY : RESERVE_LATE;
     const completesGroup = (GROUPS.get(sq.group) ?? [])
       .filter((i) => i !== idx)
       .every((i) => s.owner[i] === me.id);
@@ -50,13 +68,13 @@ export function decide(game) {
     // 2) 出狱：有卡用卡，有钱付保释金
     if (me.inJail) {
       if (me.jailCards > 0) return { action: 'useJailCard' };
-      if (me.cash > 250) return { action: 'payJailFine' };
+      if (me.cash > JAIL_FINE_CASH_ACTION) return { action: 'payJailFine' };
       return { action: 'endTurn' };
     }
 
     // 3) 建房：成组之后立刻把现金转成租金，这是唯一能逼对手破产的手段
     const buildable = BUILDABLE(game, me);
-    if (buildable.length && me.cash > 240) {
+    if (buildable.length && me.cash > BUILD_CASH) {
       buildable.sort((a, b) => {
         const ha = game.housesOn(a);
         const hb = game.housesOn(b);
@@ -64,7 +82,7 @@ export function decide(game) {
         return BOARD[b].price - BOARD[a].price;
       });
       const idx = buildable[0];
-      if (me.cash - BOARD[idx].house > 90) return { action: 'build', args: [idx] };
+      if (me.cash - BOARD[idx].house > BUILD_KEEP) return { action: 'build', args: [idx] };
     }
 
     // 4) 赎回：现金充裕时把抵押的地拿回来
@@ -73,7 +91,7 @@ export function decide(game) {
       const i = Number(idx);
       if (!s.mortgaged[i]) continue;
       const cost = Math.ceil(BOARD[i].price / 2 * 1.1);
-      if (me.cash - cost > 600) return { action: 'unmortgage', args: [i] };
+      if (me.cash - cost > UNMORTGAGE_KEEP) return { action: 'unmortgage', args: [i] };
     }
 
     return { action: 'endTurn' };

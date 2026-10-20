@@ -477,6 +477,14 @@ button, input, select { font: inherit; color: inherit; }
 /* 按钮 */
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
+/* 存档/读档的瞬时反馈 */
+.panel__hint {
+  margin: 8px 2px 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.panel__hint:not([hidden]) { color: var(--accent, #d8b45c); }
+
 .btn {
   border: 1px solid var(--line);
   background: #1b2431;

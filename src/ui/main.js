@@ -292,6 +292,19 @@ function renderControls(s, cur) {
     }
   }
 
+  // 存档 / 读档：对局进行中（且轮到真人）才提供，避免在 bot 回合打断节奏
+  if (isHuman && (s.phase === 'await-roll' || s.phase === 'await-action' || s.phase === 'await-buy')) {
+    const meta = readSaveMeta();
+    box.append(button(
+      meta ? `存档（已存 ${meta}）` : '存档',
+      'btn--sm',
+      () => saveGame(),
+    ));
+    if (hasSave()) {
+      box.append(button('读档', 'btn--sm', () => loadGame(), busy));
+    }
+  }
+
   if (!isHuman) {
     const hint = document.createElement('span');
     hint.className = 'player__meta';
@@ -300,10 +313,75 @@ function renderControls(s, cur) {
   }
 }
 
+/* ------------------------------------------------------------------ 存档 */
+const SAVE_KEY = 'monopoly-web-save-v1';
+
+function saveGame() {
+  try {
+    const payload = { v: 1, at: Date.now(), state: game.snapshot() };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+    flashSaveHint('已存档 ✓');
+  } catch (err) {
+    console.warn('存档失败', err);
+    flashSaveHint('存档失败');
+  }
+  render();
+}
+
+function hasSave() {
+  try {
+    return !!localStorage.getItem(SAVE_KEY);
+  } catch {
+    return false;
+  }
+}
+
+function readSaveMeta() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const { at } = JSON.parse(raw);
+    return new Date(at).toLocaleTimeString('zh-CN', { hour12: false });
+  } catch {
+    return null;
+  }
+}
+
+function loadGame() {
+  if (busy) return;
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    game.restore(JSON.parse(raw).state);
+    flashSaveHint('已读档 ✓');
+  } catch (err) {
+    console.warn('读档失败', err);
+    flashSaveHint('读档失败');
+  }
+  render();
+}
+
+let saveHintTimer = null;
+function flashSaveHint(text) {
+  const el = $('#save-hint');
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(saveHintTimer);
+  saveHintTimer = setTimeout(() => { el.hidden = true; }, 2000);
+}
+
 function renderAssets(s) {
-  const human = s.players.find((p) => !p.isBot && !p.bankrupt) ?? s.players[0];
+  // 「我的地产」面板只展示真人玩家。真人破产后明确提示出局，
+  // 不要回退去展示某个 bot 的资产（那会造成身份错乱）。
+  const human = s.players.find((p) => !p.isBot);
+  if (human && human.bankrupt) {
+    els.assets.innerHTML = '<p class="empty">你已破产出局，本局无法再操作资产</p>';
+    return;
+  }
+  const viewer = human ?? s.players[0];
   const mine = Object.entries(s.owner)
-    .filter(([, id]) => id === human.id)
+    .filter(([, id]) => id === viewer.id)
     .map(([idx]) => Number(idx))
     .sort((a, b) => a - b);
 
@@ -312,7 +390,7 @@ function renderAssets(s) {
     return;
   }
 
-  const canAct = s.current === human.id && !human.isBot && s.phase !== 'over';
+  const canAct = s.current === viewer.id && !viewer.isBot && s.phase !== 'over';
   els.assets.innerHTML = '';
 
   for (const idx of mine) {
@@ -322,7 +400,7 @@ function renderAssets(s) {
     const row = document.createElement('div');
     row.className = 'asset';
     const label = sq.type === 'prop'
-      ? (h === MAX_HOUSES ? '酒店' : h > 0 ? `${h} 栋` : game.groupFull(sq.group, human.id) ? '整组' : '单块')
+      ? (h === MAX_HOUSES ? '酒店' : h > 0 ? `${h} 栋` : game.groupFull(sq.group, viewer.id) ? '整组' : '单块')
       : sq.type === 'rail' ? '铁路' : '公用事业';
     row.innerHTML = `
       <span class="asset__chip" style="--group:${color};background:${color}"></span>
@@ -334,16 +412,16 @@ function renderAssets(s) {
 
     const ops = row.querySelector('.asset__ops');
     if (canAct) {
-      if (game.canBuild(idx) && s.current === human.id) {
+      if (game.canBuild(idx) && s.current === viewer.id) {
         ops.append(button(h === MAX_HOUSES - 1 ? `建酒店 ${sq.house}` : `建房 ${sq.house}`, 'btn--sm', () => act(() => game.build(idx))));
       }
-      if (s.current === human.id && game.canSellHouse(idx)) {
+      if (s.current === viewer.id && game.canSellHouse(idx)) {
         ops.append(button('卖房', 'btn--sm', () => act(() => game.sellHouse(idx))));
       }
-      if (s.current === human.id && game.canMortgage(idx)) {
+      if (s.current === viewer.id && game.canMortgage(idx)) {
         ops.append(button('抵押', 'btn--sm', () => act(() => game.mortgage(idx))));
       }
-      if (s.current === human.id && game.canUnmortgage(idx)) {
+      if (s.current === viewer.id && game.canUnmortgage(idx)) {
         ops.append(button('赎回', 'btn--sm', () => act(() => game.unmortgage(idx))));
       }
     }
@@ -379,14 +457,16 @@ function button(label, variant, onClick, disabled = false) {
   return b;
 }
 
+// 正常路径由 game.subscribe(() => render()) 驱动（引擎每个动作都会 emit），
+// 这里不再重复 render()；只有动作抛错时才强制同步一次界面。
 function act(fn) {
   if (busy) return;
   try {
     fn();
   } catch (err) {
     console.warn(err);
+    render();
   }
-  render();
 }
 
 function performRoll(fn) {
@@ -398,10 +478,13 @@ function performRoll(fn) {
       fn();
     } catch (err) {
       console.warn(err);
+      els.dice.forEach((d) => d.classList.remove('die--rolling'));
+      busy = false;
+      render();
+      return;
     }
     els.dice.forEach((d) => d.classList.remove('die--rolling'));
     busy = false;
-    render();
   }, 360);
 }
 
